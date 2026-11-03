@@ -143,8 +143,8 @@ from reported points. Never commit credentials, certificates, or databases.
 ## Development checks
 
 ```sh
-python -m pip install -r requirements.txt pytest
-pytest
+python -m pip install -r requirements-dev.txt
+pytest -q
 ```
 
 Known limitations and follow-up work are documented in [PLAN.md](PLAN.md).

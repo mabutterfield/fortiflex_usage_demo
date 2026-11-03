@@ -3,7 +3,7 @@ import calendar, csv, io, json, os, threading, time
 from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from .config import ConnectionInput, clear_connection, connection_summary, create_profile, delete_profile, is_sample_profile, list_profiles, save_connection, stored_connection, stored_connections
@@ -297,5 +297,4 @@ def export_summary(profile: str="demo", department: str="", view: str="30"):
 @app.get("/")
 @app.get("/index.html", include_in_schema=False)
 def home():
-    template = Path(__file__).with_name("templates") / "index.html"
-    return HTMLResponse(template.read_text().replace("</body>", '<script src="/static/theme-options.js"></script></body>'))
+    return FileResponse(Path(__file__).with_name("templates") / "index.html")
