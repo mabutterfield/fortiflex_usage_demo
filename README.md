@@ -19,6 +19,14 @@ Open `http://127.0.0.1:8088`. The default profile, **Demo sample data**, uses
 fake devices, departments, and historical daily readings. Intentional gaps
 demonstrate that missing data is never shown as zero.
 
+Three whole-profile reading gaps at 45, 61, and 78 days ago are included so the
+90-day display and reading calendar can demonstrate missing-data behavior.
+
+The fabricated inventory contains 32 entitlements: eighteen FortiGate VMs in
+Cloud, four Core and six R&D hardware FortiGates, and two each of
+FortiAnalyzer and FortiManager in SharedInfra. Its seven configuration profiles
+are deliberately invented examples, not copies of a live FortiFlex catalogue.
+
 The image creates `/app/template/demo_template.db` during build, then copies it
 to the persistent `./demo/demo.db` on its first sample-mode start. The `demo/`
 directory is mounted as one volume and is ignored by Git; reset it locally by
@@ -49,6 +57,13 @@ are present only on disk and are omitted here):
 
 Program serials are validated to letters, numbers, `_`, and `-`. Existing
 single-account `connection.json` files are migrated automatically on startup.
+
+Use **New environment** in the Profile controls to create either an empty
+FortiFlex-program profile (then use Edit connection) or a named Demo
+environment. The latter is generated from the tracked
+[`app/seed.py`](app/seed.py) definition, stays in sample mode, and is useful
+for a disposable walkthrough. Generated SQLite databases remain local and are
+ignored by Git.
 
 ## Dashboard and local cache
 
@@ -104,7 +119,8 @@ new data:
 
 - Department and device daily bar charts with hover values; 7/30/90-day and
   prior-month views; local device/configuration/department inventory filters;
-  cache calendar; and CSV device export.
+  cache calendar; CSV device export; and a downloadable JSON rollup for the
+  displayed period and department scope.
 - Per-program SQLite cache, multiple saved accounts for one program, and a
   configuration catalogue that links entitlement Config IDs to product, portal
   configuration name, concise profile summary, status, and local notes.

@@ -51,8 +51,33 @@ def list_profiles() -> list[dict]:
     registry = _read_registry()
     profiles = [{"id": "demo", "label": "Demo sample data", "database": "demo.db", "sample_mode": True, "account_count": 0}]
     for serial, profile in sorted(registry["profiles"].items()):
-        profiles.append({"id": serial, "label": serial, "database": profile.get("database", f"{serial}.db"), "sample_mode": False, "account_count": len(profile.get("accounts", []))})
+        profiles.append({"id": serial, "label": serial, "database": profile.get("database", f"{serial}.db"), "sample_mode": bool(profile.get("sample_mode")), "account_count": len(profile.get("accounts", []))})
     return profiles
+
+def is_sample_profile(profile: str) -> bool:
+    if profile == "demo":
+        return True
+    entry = _read_registry()["profiles"].get(profile)
+    return bool(entry and entry.get("sample_mode"))
+
+def create_profile(profile: str, source: str) -> dict:
+    """Register an empty program profile or a Demo profile for the caller to seed."""
+    if profile == "demo" or not SERIAL_RE.fullmatch(profile):
+        raise ValueError("Use a unique 3-128 character environment name")
+    if source not in {"program", "demo"}:
+        raise ValueError("Unknown environment source")
+    registry = _read_registry()
+    if profile in registry["profiles"]:
+        raise ValueError("That environment already exists")
+    destination = database_path(profile)
+    if destination.exists():
+        raise ValueError("A local database already exists for that environment")
+    entry = {"program_serial": profile, "database": destination.name, "accounts": []}
+    if source == "demo":
+        entry["sample_mode"] = True
+    registry["profiles"][profile] = entry
+    _write_registry(registry)
+    return {"id": profile, "label": profile, "database": destination.name, "sample_mode": bool(entry.get("sample_mode")), "account_count": 0}
 
 def connection_summary(profile: str) -> dict:
     if profile == "demo": return {"configured": False, "account_count": 0}
@@ -80,6 +105,7 @@ def stored_connections(profile: str) -> list[ConnectionInput]:
 def save_connection(data: ConnectionInput) -> None:
     registry = _read_registry(); profiles = registry["profiles"]
     profile = profiles.setdefault(data.program_serial, {"program_serial": data.program_serial, "database": f"{data.program_serial}.db", "accounts": []})
+    profile.pop("sample_mode", None)
     saved = data.model_dump(); accounts = profile["accounts"]
     profile["accounts"] = [a for a in accounts if not (a["account_id"] == saved["account_id"] and a["username"] == saved["username"])] + [saved]
     _write_registry(registry)
