@@ -152,6 +152,8 @@ activemq-data/
 # Environments
 .env
 .envrc
+.env.*
+!.env.example
 .venv
 env/
 venv/
@@ -218,3 +220,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# FortiFlex demo local state and credentials
+data/
+secrets/
+demo/*
+!demo/.gitkeep
+*.pem
+*.key
+*.crt
+*.sqlite3
+*.sqlite3-*
