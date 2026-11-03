@@ -43,26 +43,23 @@ def _read_registry() -> dict:
     return raw
 
 def database_path(profile: str) -> Path:
-    if profile == "demo": return data_dir() / "demo.db"
     if not SERIAL_RE.fullmatch(profile): raise ValueError("Unknown profile")
     return data_dir() / f"{profile}.db"
 
 def list_profiles() -> list[dict]:
     registry = _read_registry()
-    profiles = [{"id": "demo", "label": "Demo sample data", "database": "demo.db", "sample_mode": True, "account_count": 0}]
+    profiles = []
     for serial, profile in sorted(registry["profiles"].items()):
         profiles.append({"id": serial, "label": serial, "database": profile.get("database", f"{serial}.db"), "sample_mode": bool(profile.get("sample_mode")), "account_count": len(profile.get("accounts", []))})
     return profiles
 
 def is_sample_profile(profile: str) -> bool:
-    if profile == "demo":
-        return True
     entry = _read_registry()["profiles"].get(profile)
     return bool(entry and entry.get("sample_mode"))
 
 def create_profile(profile: str, source: str) -> dict:
     """Register an empty program profile or a Demo profile for the caller to seed."""
-    if profile == "demo" or not SERIAL_RE.fullmatch(profile):
+    if not SERIAL_RE.fullmatch(profile):
         raise ValueError("Use a unique 3-128 character environment name")
     if source not in {"program", "demo"}:
         raise ValueError("Unknown environment source")
@@ -80,13 +77,12 @@ def create_profile(profile: str, source: str) -> dict:
     return {"id": profile, "label": profile, "database": destination.name, "sample_mode": bool(entry.get("sample_mode")), "account_count": 0}
 
 def connection_summary(profile: str) -> dict:
-    if profile == "demo": return {"configured": False, "account_count": 0}
     entry = _read_registry()["profiles"].get(profile)
     accounts = entry.get("accounts", []) if entry else []
     # This is deliberately safe to send to the browser: it identifies saved
     # accounts but never exposes a password or bearer token.
     return {
-        "configured": bool(entry),
+        "configured": bool(accounts),
         "account_count": len(accounts),
         "accounts": [{"account_id": account["account_id"], "username": account["username"], "password_masked": bool(account.get("password"))} for account in accounts],
     }
@@ -111,5 +107,16 @@ def save_connection(data: ConnectionInput) -> None:
     _write_registry(registry)
 
 def clear_connection(profile: str) -> None:
-    if profile == "demo": return
     registry = _read_registry(); registry["profiles"].pop(profile, None); _write_registry(registry)
+
+def delete_profile(profile: str) -> None:
+    """Remove exactly one locally managed profile and its SQLite files."""
+    registry = _read_registry()
+    if profile not in registry["profiles"]:
+        raise ValueError("Profile not found")
+    database = database_path(profile)
+    for path in (database, Path(str(database) + "-wal"), Path(str(database) + "-shm")):
+        if path.exists():
+            path.unlink()
+    registry["profiles"].pop(profile)
+    _write_registry(registry)

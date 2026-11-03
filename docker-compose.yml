@@ -4,9 +4,8 @@ services:
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-8088}:8088"
     environment:
-      APP_DB_PATH: /app/demo/${PROGRAM_SERIAL:-demo}.db
+      APP_DB_PATH: /app/demo/runtime.db
       APP_SECRETS_PATH: /app/demo/connection.json
-      SAMPLE_MODE: ${SAMPLE_MODE:-true}
       CURRENCY_RATE: ${CURRENCY_RATE:-}
       TLS_CERT_FILE: ${TLS_CERT_FILE:-}
       TLS_KEY_FILE: ${TLS_KEY_FILE:-}

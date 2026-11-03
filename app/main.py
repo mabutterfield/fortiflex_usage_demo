@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from .config import ConnectionInput, clear_connection, connection_summary, create_profile, is_sample_profile, list_profiles, save_connection, stored_connection, stored_connections
+from .config import ConnectionInput, clear_connection, connection_summary, create_profile, delete_profile, is_sample_profile, list_profiles, save_connection, stored_connection, stored_connections
 from .db import connect
 from .fortiflex import FortiFlexError, daily_points, list_configurations, list_entitlements, token
 from .seed import seed
@@ -80,6 +80,19 @@ def new_profile(request: ProfileCreate):
         return created
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
+@app.delete("/api/profiles/{profile}")
+def remove_profile(profile: str):
+    try:
+        delete_profile(profile)
+    except ValueError as error:
+        raise HTTPException(404, str(error)) from error
+    return {"ok": True}
+@app.post("/api/profiles/{profile}/reset-demo")
+def reset_demo_profile(profile: str):
+    if not is_sample_profile(profile):
+        raise HTTPException(400, "Only Demo profiles can be reset")
+    seed(profile)
+    return {"ok": True, "message": "Demo database reset"}
 @app.get("/api/status")
 def status(profile: str="demo"):
     with connect(profile) as c: row=c.execute("SELECT status,message,refreshed_at FROM refresh_state WHERE id=1").fetchone()

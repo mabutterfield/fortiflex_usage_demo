@@ -15,9 +15,10 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Open `http://127.0.0.1:8088`. The default profile, **Demo sample data**, uses
-fake devices, departments, and historical daily readings. Intentional gaps
-demonstrate that missing data is never shown as zero.
+Open `http://127.0.0.1:8088`, choose **New profile**, then choose **Demo
+environment**. It uses fake devices, departments, and historical daily
+readings. Intentional gaps demonstrate that missing data is never shown as
+zero.
 
 Three whole-profile reading gaps at 45, 61, and 78 days ago are included so the
 90-day display and reading calendar can demonstrate missing-data behavior.
@@ -27,16 +28,13 @@ Cloud, four Core and six R&D hardware FortiGates, and two each of
 FortiAnalyzer and FortiManager in SharedInfra. Its seven configuration profiles
 are deliberately invented examples, not copies of a live FortiFlex catalogue.
 
-The image creates `/app/template/demo_template.db` during build, then copies it
-to the persistent `./demo/demo.db` on its first sample-mode start. The `demo/`
-directory is mounted as one volume and is ignored by Git; reset it locally by
-deleting the specific `demo/demo.db` file, then starting the service again.
+Demo environments are generated from the tracked seed definition when created
+or reset. The `demo/` directory is mounted as one volume and ignored by Git.
 
 ## Profiles and local storage
 
-The top-bar **Profile** selector always includes `Demo sample data`. Saving a
-connection creates or updates a second profile named for its FortiFlex program
-serial; it uses `demo/<PROGRAM_SERIAL>.db`. Saving a different account for the
+The top-bar **Profile** selector contains only profiles you created. A program
+profile uses `demo/<PROGRAM_SERIAL>.db`; saving a different account for the
 same program adds an account to that profile rather than overwriting the first.
 
 `demo/connection.json` is a mode-0600 local registry, shaped like this (passwords
@@ -58,7 +56,7 @@ are present only on disk and are omitted here):
 Program serials are validated to letters, numbers, `_`, and `-`. Existing
 single-account `connection.json` files are migrated automatically on startup.
 
-Use **New environment** in the Profile controls to create either an empty
+Use **New profile** in the Profile controls to create either an empty
 FortiFlex-program profile (then use Edit connection) or a named Demo
 environment. The latter is generated from the tracked
 [`app/seed.py`](app/seed.py) definition, stays in sample mode, and is useful
@@ -70,10 +68,11 @@ ignored by Git.
 The dashboard intentionally separates **viewing** cached data from **pulling**
 new data:
 
-- The Profile controls contain **Edit connection**, **Test connection**,
-  **(Re) Populate inventory**, **(Re) Populate configurations**, **Pull week**,
-  **Pull full data**, and **Reading calendar**. Editing only saves local
-  credentials; testing only performs OAuth validation.
+- Profile controls are context-sensitive: Demo profiles offer **Reset demo
+  database** and **Reading calendar**; program profiles offer **Edit
+  connection**, **Test connection**, catalog population, daily pulls, and the
+  reading calendar. Editing only saves local credentials; testing only performs
+  OAuth validation.
 - Inventory population updates FortiFlex-owned values (serial, portal name,
   entitlement status, dates, and Config ID), while preserving locally assigned
   department codes and device notes. Configuration population similarly keeps
