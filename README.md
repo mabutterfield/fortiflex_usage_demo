@@ -120,7 +120,7 @@ new data:
   Config ID. Clicking a serial opens its bar chart; clicking its Config ID moves
   to the matching configuration record.
 - **Configuration inventory:** `Name` is the configuration label supplied by
-  FortiFlex (for example, `fg-vm01-FC_tf`). `Profile` is a concise local display
+  FortiFlex. `Profile` is a concise local display
   summary derived from the cached parameters (for example, `1 vCPU · FortiCare
   only` or `10 GB/day · Support + 3 add-ons`). It is not an official SKU.
   Only configuration Notes are editable locally.
@@ -146,8 +146,7 @@ new data:
   maps its product to a calculator product type, sends the program serial,
   `count: 1`, and the complete cached parameter list, then saves the returned
   `current`, `latest`, and `latestEffectiveDate` values on that same local
-  Config ID row. `latest` and its effective date remain blank when Fortinet
-  does not advertise a pending price change.
+  Config ID row. 
 - Sample-mode refresh and idempotent SQLite records keyed by serial/date.
 - Web API setup route and CLI use the same input validation. Credentials are
   saved only server-side in plaintext `demo/connection.json` with restricted
