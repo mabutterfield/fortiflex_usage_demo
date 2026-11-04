@@ -93,7 +93,7 @@
   const tray = document.createElement("aside");
   tray.id = "apiTray";
   tray.setAttribute("aria-label", "FortiFlex API log");
-  tray.innerHTML = `<header><div class="tray-head"><h2>API Log</h2><button class="secondary">Close</button></div><p class="muted" id="apiTrayDescription">Latest successful sample per call for this profile. Authentication values are redacted and samples are memory-only.</p></header><div id="apiSamples" class="muted">No API calls have been captured yet.</div>`;
+  tray.innerHTML = `<header><div class="tray-head"><h2>API Log</h2><button class="secondary">Close</button></div><p class="muted" id="apiTrayDescription">Latest successful response per call for this profile. Authentication values are redacted; returned record lists are limited to five and retained only in memory.</p></header><div id="apiSamples" class="muted">No API calls have been captured yet.</div>`;
   document.body.append(tray);
   tray.querySelector("button").onclick = () => tray.classList.remove("open");
 
@@ -106,7 +106,7 @@
     title.textContent = isSample ? "API Sample" : "API Log";
     description.textContent = isSample
       ? "Fabricated FortiFlex examples for demonstration. Authentication values are redacted."
-      : "Latest successful sample per call for this profile. Authentication values are redacted and samples are memory-only.";
+      : "Latest successful response per call for this profile. Authentication values are redacted; returned record lists are limited to five and retained only in memory.";
     tray.classList.add("open");
     target.className = "muted";
     target.textContent = isSample ? "Loading sample…" : "Loading API Log…";
@@ -125,7 +125,11 @@
         const card = document.createElement("details");
         card.className = "api-sample";
         const heading = document.createElement("summary");
-        heading.textContent = `${sample.operation} — ${sample.response.record_count} record(s), showing ${sample.response.sample_records.length}`;
+        const records = isSample ? sample.response.sample_records : sample.response.records;
+        const recordSummary = sample.response.record_count
+          ? ` — ${sample.response.record_count} record(s), showing ${records.length}${sample.response.truncated ? "" : ""}`
+          : " — response details";
+        heading.textContent = `${sample.operation}${recordSummary}`;
         const detail = document.createElement("pre");
         detail.textContent = JSON.stringify(sample, null, 2);
         card.append(heading, detail);

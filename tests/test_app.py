@@ -131,7 +131,8 @@ def test_api_samples_are_memory_only_and_recursively_redacted(tmp_path, monkeypa
     assert sample["request"]["authorization"] == "Bearer <redacted>"
     assert sample["response"]["metadata"]["access_token"] == "<redacted>"
     assert sample["response"]["record_count"] == 6
-    assert len(sample["response"]["sample_records"]) == 5
+    assert len(sample["response"]["records"]) == 5
+    assert sample["response"]["truncated"] is True
 
 
 def test_api_sample_is_fabricated_and_limited_to_five_records(tmp_path, monkeypatch):
@@ -141,7 +142,7 @@ def test_api_sample_is_fabricated_and_limited_to_five_records(tmp_path, monkeypa
     assert response.status_code == 200
     samples = response.json()["samples"]
     assert len(samples) == 3
-    assert all(sample["sample_data"] is True for sample in samples)
+    assert all(sample["fabricated"] is True for sample in samples)
     assert all(sample["request"]["body"]["accountId"] == 12345 for sample in samples)
     assert all(len(sample["response"]["sample_records"]) == 5 for sample in samples)
     assert samples[1]["response"]["sample_records"][0]["name"] == "SampleFGT1"
@@ -186,6 +187,40 @@ def test_delete_usage_date_range_clears_local_cache_and_coverage(tmp_path, monke
     with connect("DemoTest") as database:
         assert database.execute("SELECT COUNT(*) FROM usage_records WHERE usage_date BETWEEN ? AND ?", (start.isoformat(), end.isoformat())).fetchone()[0] == 0
         assert database.execute("SELECT COUNT(*) FROM usage_day_coverage WHERE usage_date BETWEEN ? AND ?", (start.isoformat(), end.isoformat())).fetchone()[0] == 0
+
+
+def test_pricing_uses_only_active_cached_configurations(tmp_path, monkeypatch):
+    monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "runtime.db"))
+    monkeypatch.setenv("APP_SECRETS_PATH", str(tmp_path / "connection.json"))
+    from app import main
+    from app.db import connect
+
+    client = TestClient(main.app)
+    client.post("/api/setup", json={"account_id": 12, "username": "reader", "password": "secret", "program_serial": "PriceTest"})
+    features = json.dumps({"parameters": [{"id": 1, "name": "Number of CPUs", "value": "2"}, {"id": 2, "name": "Service Package", "value": "UTP"}]})
+    with connect("PriceTest") as database:
+        database.execute("INSERT INTO configurations(config_id,product,config_name,features,status,notes,refreshed_at) VALUES(?,?,?,?,?,?,?)", (1, "FortiGate-VM", "active", features, "ACTIVE", "", "now"))
+        database.execute("INSERT INTO configurations(config_id,product,config_name,features,status,notes,refreshed_at) VALUES(?,?,?,?,?,?,?)", (2, "FortiGate-VM", "disabled", features, "DISABLED", "", "now"))
+    monkeypatch.setattr(main, "token", lambda account: "test-token")
+    monkeypatch.setattr(main, "pricing_metadata", lambda *args: [{"productTypeId": 1, "name": "FortiGate Virtual Machine - Service Bundle", "parameters": [{"name": "Number of CPUs"}, {"name": "Service Package"}]}])
+    calls = []
+    def calculate(_account, _token, product_type_id, parameters, capture):
+        calls.append((product_type_id, parameters))
+        capture("/tools/calc", {"productTypeId": product_type_id, "parameters": parameters}, {"status": 0, "configs": {"current": 3.5, "latest": 4.0, "latestEffectiveDate": "2027-01-01"}})
+        return {"current": 3.5, "latest": 4.0, "latestEffectiveDate": "2027-01-01"}
+    monkeypatch.setattr(main, "calculate_points", calculate)
+
+    response = client.post("/api/configurations/prices?profile=PriceTest")
+
+    assert response.status_code == 200
+    assert response.json()["active"] == 1
+    assert response.json()["priced"] == 1
+    assert calls == [(1, [{"id": 1, "value": "2"}, {"id": 2, "value": "UTP"}])]
+    configurations = client.get("/api/configurations?profile=PriceTest").json()
+    assert configurations[0]["points_per_day"] == 3.5
+    assert configurations[1]["points_per_day"] is None
+    log = client.get("/api/debug/log?profile=PriceTest").json()["samples"]
+    assert any(sample["operation"] == "Configuration pricing" for sample in log)
 
 
 def test_pull_week_uses_only_last_seven_complete_days(tmp_path, monkeypatch):

@@ -137,15 +137,28 @@ new data:
 - Per-profile SQLite cache with one saved account, and a configuration catalogue
   that links entitlement Config IDs to product, portal
   configuration name, concise profile summary, status, and local notes.
+- **Pull config prices** calculates the current daily points for cached ACTIVE
+  configurations only. It never refreshes the catalogue first; use Populate
+  catalog when the cached configuration definition needs updating.
+- **How configuration pricing works:** A configuration's FortiFlex Config ID
+  identifies the local catalogue row and links devices back to it; it is *not*
+  sent to the points calculator. For each cached ACTIVE configuration, the app
+  maps its product to a calculator product type, sends the program serial,
+  `count: 1`, and the complete cached parameter list, then saves the returned
+  `current`, `latest`, and `latestEffectiveDate` values on that same local
+  Config ID row. `latest` and its effective date remain blank when Fortinet
+  does not advertise a pending price change.
 - Sample-mode refresh and idempotent SQLite records keyed by serial/date.
 - Web API setup route and CLI use the same input validation. Credentials are
   saved only server-side in plaintext `demo/connection.json` with restricted
   permissions; API responses never return passwords.
-- **API Log** is a right-side debug tray on live profiles. It retains one in-memory sample each
-  for entitlement inventory, configuration catalogue, and daily points calls.
+- **API Log** is a right-side debug tray on live profiles. It retains one
+  in-memory response each for entitlement inventory, configuration catalogue,
+  daily points, calculator metadata, and configuration pricing calls. Live
+  response lists are limited to five real `records`; they are not fabricated.
   OAuth/login requests are excluded, and passwords, tokens, authorization
-  values, and similarly named fields are recursively redacted before a sample
-  reaches the browser. Samples disappear when the app restarts. **API Sample**
+  values, and similarly named fields are recursively redacted before a response
+  reaches the browser. Entries disappear when the app restarts. **API Sample**
   is available on every profile and shows clearly fabricated, safe sample calls;
   Demo profiles show only that button.
 - `python -m app.cli init-sample`, `status`, `setup`, and `clear-connection`

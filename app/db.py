@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS usage_day_coverage (
 CREATE TABLE IF NOT EXISTS configurations (
  config_id INTEGER PRIMARY KEY, product TEXT NOT NULL DEFAULT '',
  config_name TEXT NOT NULL DEFAULT '', features TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '',
- notes TEXT NOT NULL DEFAULT '', refreshed_at TEXT NOT NULL DEFAULT ''
+ notes TEXT NOT NULL DEFAULT '', refreshed_at TEXT NOT NULL DEFAULT '',
+ points_per_day REAL, latest_points_per_day REAL, pricing_effective_date TEXT,
+ priced_at TEXT, pricing_status TEXT NOT NULL DEFAULT ''
 );
 INSERT OR IGNORE INTO refresh_state VALUES(1, 'ready', 'Sample data loaded', NULL);
 """
@@ -54,8 +56,14 @@ def connect(profile: str = "demo"):
         if column not in existing_columns:
             conn.execute(f"ALTER TABLE devices ADD COLUMN {column} {definition}")
     configuration_columns = {row["name"] for row in conn.execute("PRAGMA table_info(configurations)")}
-    if "config_name" not in configuration_columns:
-        conn.execute("ALTER TABLE configurations ADD COLUMN config_name TEXT NOT NULL DEFAULT ''")
+    for column, definition in (
+        ("config_name", "TEXT NOT NULL DEFAULT ''"),
+        ("points_per_day", "REAL"), ("latest_points_per_day", "REAL"),
+        ("pricing_effective_date", "TEXT"), ("priced_at", "TEXT"),
+        ("pricing_status", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if column not in configuration_columns:
+            conn.execute(f"ALTER TABLE configurations ADD COLUMN {column} {definition}")
     # Existing caches already contain the raw structured feature document.
     # Derive the portal configuration name locally without another API call.
     for row in conn.execute("SELECT config_id,features FROM configurations WHERE config_name=''"):

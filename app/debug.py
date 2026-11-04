@@ -29,15 +29,15 @@ def _redact(value: Any, key: str = "") -> Any:
 
 def _records(response: dict) -> tuple[list, dict]:
     """Extract the first list-like API result while preserving useful metadata."""
-    summary = {key: value for key, value in response.items() if key not in {"entitlements", "configurations", "configs", "data"}}
-    for key in ("entitlements", "configurations", "configs", "data"):
+    summary = dict(response)
+    for key in ("entitlements", "configurations", "configs", "productTypes", "data"):
         value = response.get(key)
         if isinstance(value, list):
-            return value, summary
+            return value, {item_key: item for item_key, item in summary.items() if item_key != key}
         if isinstance(value, dict):
             flattened = [dict(item, _group=group) for group, items in value.items() for item in (items if isinstance(items, list) else []) if isinstance(item, dict)]
             if flattened:
-                return flattened, summary
+                return flattened, {item_key: item for item_key, item in summary.items() if item_key != key}
     return [], summary
 
 
@@ -52,7 +52,8 @@ def record(profile: str, operation: str, endpoint: str, request: dict, response:
         "response": {
             "metadata": _redact(metadata),
             "record_count": len(records),
-            "sample_records": _redact(records[:5]),
+            "records": _redact(records[:5]),
+            "truncated": len(records) > 5,
         },
     }
     with _lock:
@@ -108,6 +109,6 @@ def _sample(operation: str, endpoint: str, request: dict, response: dict) -> dic
         "captured_at": f"{date.today().isoformat()}T00:00:00Z",
         "endpoint": endpoint,
         "request": {"body": _redact(request), "authorization": "Bearer <redacted>"},
-        "response": {"metadata": _redact(metadata), "record_count": len(records), "sample_records": _redact(records[:5])},
-        "sample_data": True,
+        "response": {"metadata": _redact(metadata), "record_count": len(records), "sample_records": _redact(records[:5]), "truncated": len(records) > 5},
+        "fabricated": True,
     }

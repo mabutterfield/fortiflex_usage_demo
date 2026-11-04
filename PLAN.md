@@ -23,6 +23,10 @@ Implemented so far:
    profile summary.
 4. One profile has one saved FortiFlex account. Inventory and configuration
    pulls preserve local notes and department mapping.
+5. Cached ACTIVE configurations can be priced through the FortiFlex calculator.
+   The local Config ID identifies the catalogue row only; each calculator
+   request uses the cached product type and full parameter list, and returned
+   current/latest/effective-date pricing is stored back on that Config ID row.
 
 ## Confirmed integration behavior
 
@@ -72,9 +76,6 @@ inclusive/exclusive boundary behavior before calling those results daily usage.
    summary, not a SKU.
 5. Keep the scope read-only: this application does not alter running devices or
    FortiFlex entitlements.
-6. Evaluate the official FortiFlex Calculator as a future reference for point
-   estimation and configuration interpretation. Do not integrate it until its
-   API, licensing, and intended use have been reviewed.
-7. Add a profile-scoped, account-aware points-calculator view only after the
-   FortiCare calculator endpoint and its program-specific pricing response are
-   verified through the redacted API Log tray.
+6. Optionally add a profile-scoped, account-aware manual calculator view. The
+   current feature deliberately prices only cached ACTIVE configurations and
+   never creates or changes a FortiFlex configuration.

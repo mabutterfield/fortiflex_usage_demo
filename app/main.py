@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from .config import ConnectionInput, clear_connection, connection_summary, create_profile, delete_profile, is_sample_profile, list_profiles, save_connection, stored_connection
 from .db import connect
 from .debug import demo_samples, record as record_api_sample, samples as api_samples
-from .fortiflex import FortiFlexError, daily_points, list_configurations, list_entitlements, token
+from .fortiflex import FortiFlexError, calculate_points, daily_points, list_configurations, list_entitlements, pricing_metadata, token
 from .seed import seed
 
 app = FastAPI(title="FortiFlex departmental chargeback demo")
@@ -191,6 +191,100 @@ def configurations(profile: str="demo", product: str="", status: str=""):
     where = " WHERE " + " AND ".join(clauses) if clauses else ""
     with connect(profile) as c:
         return [dict(row) for row in c.execute("SELECT * FROM configurations"+where+" ORDER BY config_id", args)]
+
+
+def _pricing_parameters(features: str) -> list[dict]:
+    try:
+        values = json.loads(features).get("parameters", [])
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(values, list):
+        return []
+    parameters = []
+    for value in values:
+        if not isinstance(value, dict) or value.get("value") is None:
+            continue
+        parameter_id = value.get("id") or value.get("parameterId")
+        try:
+            parameters.append({"id": int(parameter_id), "value": str(value["value"])})
+        except (TypeError, ValueError):
+            continue
+    return parameters
+
+
+def _pricing_product_type(config: dict, metadata: list[dict]) -> int | None:
+    aliases = {
+        "fortigatevm": "fortigatevirtualmachine", "fortiwebvm": "fortiwebvirtualmachine",
+        "fortimanagervm": "fortimanagervirtualmachine", "fortianalyzervm": "fortianalyzervirtualmachine",
+        "fortiadcvm": "fortiadcvirtualmachine", "forticlientems": "forticlientems",
+        "fortisoarvm": "fortisoarvirtualmachine", "fortinacvm": "fortinacvirtualmachine",
+        "fortiswitchhardware": "fortiswitch",
+    }
+    family = "".join(character for character in str(config["product"]).lower() if character.isalnum())
+    family = aliases.get(family, family)
+    try:
+        cached_parameters = json.loads(config["features"]).get("parameters", [])
+    except (TypeError, ValueError):
+        return None
+    parameter_names = {
+        str(value.get("name", "")).lower() for value in cached_parameters
+        if isinstance(value, dict) and value.get("name")
+    }
+    candidates = []
+    for item in metadata:
+        try:
+            item_id = int(item["productTypeId"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        name = "".join(character for character in str(item.get("name", "")).lower() if character.isalnum())
+        if not family or family not in name:
+            continue
+        metadata_names = {str(value.get("name", "")).lower() for value in item.get("parameters", []) if isinstance(value, dict)}
+        candidates.append((len(parameter_names & metadata_names), item_id))
+    return max(candidates, default=(-1, None))[1]
+
+
+@app.post("/api/configurations/prices")
+def pull_configuration_prices(profile: str = "demo"):
+    """Price only cached ACTIVE configurations; this never refreshes the catalogue."""
+    if is_sample_profile(profile):
+        raise HTTPException(400, "Demo profiles have fabricated configuration prices")
+    account = stored_connection(profile)
+    if not account:
+        raise HTTPException(400, "No saved account for this profile")
+    with connect(profile) as c:
+        active = [dict(row) for row in c.execute("SELECT * FROM configurations WHERE UPPER(status)='ACTIVE' ORDER BY config_id")]
+    if not active:
+        return {"ok": True, "active": 0, "priced": 0, "skipped": 0, "message": "No ACTIVE cached configurations to price."}
+    try:
+        access_token = token(account)
+        metadata = pricing_metadata(account, access_token, lambda endpoint, request, response: record_api_sample(profile, "Pricing metadata", endpoint, request, response))
+    except FortiFlexError as error:
+        raise HTTPException(502, str(error)) from error
+    priced = skipped = 0
+    now = datetime.now(timezone.utc).isoformat()
+    with connect(profile) as c:
+        for config in active:
+            parameters = _pricing_parameters(config["features"])
+            product_type_id = _pricing_product_type(config, metadata)
+            if not parameters or product_type_id is None:
+                skipped += 1
+                c.execute("UPDATE configurations SET pricing_status=?,priced_at=? WHERE config_id=?", ("Unsupported cached configuration", now, config["config_id"]))
+                continue
+            try:
+                points = calculate_points(account, access_token, product_type_id, parameters, lambda endpoint, request, response: record_api_sample(profile, "Configuration pricing", endpoint, request, response))
+                c.execute("UPDATE configurations SET points_per_day=?,latest_points_per_day=?,pricing_effective_date=?,priced_at=?,pricing_status=? WHERE config_id=?", (float(points["current"]), points.get("latest"), points.get("latestEffectiveDate"), now, "Priced", config["config_id"]))
+                priced += 1
+            except (FortiFlexError, TypeError, ValueError) as error:
+                skipped += 1
+                c.execute("UPDATE configurations SET pricing_status=?,priced_at=? WHERE config_id=?", (str(error)[:180], now, config["config_id"]))
+    return {
+        "ok": True,
+        "active": len(active),
+        "priced": priced,
+        "skipped": skipped,
+        "message": f"Checked {len(active)} ACTIVE cached configuration(s): priced {priced}; skipped {skipped}.",
+    }
 
 class DeviceEdit(BaseModel):department_code:str;notes:str=""
 @app.put("/api/devices/{serial}")

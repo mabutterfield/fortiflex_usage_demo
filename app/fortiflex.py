@@ -104,3 +104,41 @@ def list_configurations(connection: ConnectionInput, capture: Callable[[str, dic
             "features": features,
         })
     return safe
+
+
+def pricing_metadata(connection: ConnectionInput, access_token: str, capture: Callable[[str, dict, dict], None] | None = None) -> list[dict]:
+    """Return calculator metadata needed to map cached configurations safely."""
+    result = _request(f"{API_BASE}/tools/metadata", {}, access_token)
+    if capture:
+        capture("/tools/metadata", {}, result)
+    if result.get("status") not in (0, None):
+        raise FortiFlexError(result.get("message") or "FortiFlex did not accept the pricing metadata request")
+    items = result.get("productTypes") or []
+    if not isinstance(items, list):
+        raise FortiFlexError("Unexpected pricing metadata response format")
+    return [item for item in items if isinstance(item, dict)]
+
+
+def calculate_points(connection: ConnectionInput, access_token: str, product_type_id: int, parameters: list[dict], capture: Callable[[str, dict, dict], None] | None = None) -> dict:
+    """Calculate one cached configuration's per-instance daily point price."""
+    payload = {
+        "programSerialNumber": connection.program_serial,
+        "count": 1,
+        "productTypeId": product_type_id,
+        "parameters": parameters,
+    }
+    result = _request(f"{API_BASE}/tools/calc", payload, access_token)
+    if capture:
+        capture("/tools/calc", payload, result)
+    if result.get("status") not in (0, None):
+        raise FortiFlexError(result.get("message") or "FortiFlex did not accept the pricing request")
+    # The calculator response is named `configs` in the current API, while
+    # older documentation/examples show `points` or a `data.points` wrapper.
+    # Accept all known shapes without inventing a value when none is returned.
+    data = result.get("data")
+    points = result.get("points") or result.get("configs")
+    if not isinstance(points, dict) and isinstance(data, dict):
+        points = data.get("points") or data
+    if not isinstance(points, dict) or points.get("current") is None:
+        raise FortiFlexError("Unexpected pricing response format")
+    return points
