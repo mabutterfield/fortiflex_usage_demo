@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from .config import ConnectionInput, clear_connection, connection_summary, create_profile, delete_profile, is_sample_profile, list_profiles, save_connection, stored_connection
 from .db import connect
+from .debug import demo_samples, record as record_api_sample, samples as api_samples
 from .fortiflex import FortiFlexError, daily_points, list_configurations, list_entitlements, token
 from .seed import seed
 
@@ -99,6 +100,12 @@ def reset_demo_profile(profile: str):
 def status(profile: str="demo"):
     with connect(profile) as c: row=c.execute("SELECT status,message,refreshed_at FROM refresh_state WHERE id=1").fetchone()
     return {"profile":profile,"sample_mode":is_sample_profile(profile),"connection":connection_summary(profile),"refresh":dict(row),"pull":PULL_JOBS.get(profile)}
+@app.get("/api/debug/log")
+def debug_log(profile: str="demo"):
+    return {"samples": api_samples(profile)}
+@app.get("/api/debug/sample")
+def debug_sample():
+    return {"samples": demo_samples()}
 @app.get("/api/departments")
 def departments(profile: str="demo"):
     with connect(profile) as c:return [dict(r) for r in c.execute("SELECT d.*,COUNT(v.serial) entitlement_count FROM departments d LEFT JOIN devices v ON v.department_code=d.code GROUP BY d.code ORDER BY d.code")]
@@ -132,6 +139,37 @@ def coverage_month(profile: str="demo", month: str=""):
         else: state = "missing"
         readings.append({"usage_date":day,"state":state})
     return {"month":month,"data_start":data_start,"days":readings}
+
+
+class UsageDateDelete(BaseModel):
+    start_date: date
+    end_date: date
+
+
+@app.post("/api/usage/dates/delete")
+def delete_usage_dates(request: UsageDateDelete, profile: str = "demo"):
+    """Delete a local cached usage range only; FortiFlex is never changed."""
+    if request.end_date < request.start_date:
+        raise HTTPException(400, "End date must be on or after start date")
+    start, end = request.start_date.isoformat(), request.end_date.isoformat()
+    with connect(profile) as c:
+        usage_deleted = c.execute(
+            "DELETE FROM usage_records WHERE usage_date BETWEEN ? AND ?", (start, end)
+        ).rowcount
+        coverage_deleted = c.execute(
+            "DELETE FROM usage_day_coverage WHERE usage_date BETWEEN ? AND ?", (start, end)
+        ).rowcount
+        c.execute(
+            "UPDATE refresh_state SET status='ready', message=?, refreshed_at=? WHERE id=1",
+            (f"Deleted local cache for {start} through {end}", datetime.now(timezone.utc).isoformat()),
+        )
+    return {
+        "ok": True,
+        "start_date": start,
+        "end_date": end,
+        "usage_records_deleted": usage_deleted,
+        "coverage_records_deleted": coverage_deleted,
+    }
 @app.get("/api/devices")
 def devices(profile: str="demo",department: str="",status: str="",config_id: str="",product: str=""):
     where,args=[],[]
@@ -227,7 +265,7 @@ def populate_inventory(profile:str):
     if is_sample_profile(profile):raise HTTPException(400,"Demo inventory is already populated")
     account=stored_connection(profile)
     if not account:raise HTTPException(400,"No saved account for this profile")
-    try:inventory=[item for item in list_entitlements(account) if item.get("serialNumber")]
+    try:inventory=[item for item in list_entitlements(account, lambda endpoint, request, response: record_api_sample(profile, "Entitlement inventory", endpoint, request, response)) if item.get("serialNumber")]
     except FortiFlexError as error:raise HTTPException(502,str(error)) from error
     added,kept=0,0
     with connect(profile) as c:
@@ -245,7 +283,7 @@ def populate_configurations(profile: str):
     account = stored_connection(profile)
     if not account: raise HTTPException(400,"No saved account for this profile")
     try:
-        entries = list_configurations(account)
+        entries = list_configurations(account, lambda endpoint, request, response: record_api_sample(profile, "Configuration catalogue", endpoint, request, response))
     except FortiFlexError as error:
         raise HTTPException(502,str(error)) from error
     now = datetime.now(timezone.utc).isoformat()
@@ -268,7 +306,7 @@ def pull_worker(profile:str,selected:list[str]):
         access_token=token(account)
         for day in selected:
             try:
-                readings=daily_points(account,day,access_token)
+                readings=daily_points(account,day,access_token, lambda endpoint, request, response: record_api_sample(profile, "Daily point usage", endpoint, request, response))
                 with connect(profile) as c:
                     known={r["serial"] for r in c.execute("SELECT serial FROM devices")};now=datetime.now(timezone.utc).isoformat()
                     for item in readings:

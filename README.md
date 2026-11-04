@@ -131,7 +131,8 @@ new data:
 
 - Department and device daily bar charts with hover values; 7/30/90-day and
   prior-month views; local device/configuration/department inventory filters;
-  cache calendar; CSV device export; and a downloadable JSON rollup for the
+  cache calendar with local single-date/range deletion (FortiFlex is never
+  changed); CSV device export; and a downloadable JSON rollup for the
   displayed period and department scope.
 - Per-profile SQLite cache with one saved account, and a configuration catalogue
   that links entitlement Config IDs to product, portal
@@ -140,6 +141,13 @@ new data:
 - Web API setup route and CLI use the same input validation. Credentials are
   saved only server-side in plaintext `demo/connection.json` with restricted
   permissions; API responses never return passwords.
+- **API Log** is a right-side debug tray on live profiles. It retains one in-memory sample each
+  for entitlement inventory, configuration catalogue, and daily points calls.
+  OAuth/login requests are excluded, and passwords, tokens, authorization
+  values, and similarly named fields are recursively redacted before a sample
+  reaches the browser. Samples disappear when the app restarts. **API Sample**
+  is available on every profile and shows clearly fabricated, safe sample calls;
+  Demo profiles show only that button.
 - `python -m app.cli init-sample`, `status`, `setup`, and `clear-connection`
   offer the corresponding local CLI operations (run within the container, or
   in a Python environment with `requirements.txt` installed).

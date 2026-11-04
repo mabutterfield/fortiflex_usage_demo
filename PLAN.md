@@ -75,5 +75,6 @@ inclusive/exclusive boundary behavior before calling those results daily usage.
 6. Evaluate the official FortiFlex Calculator as a future reference for point
    estimation and configuration interpretation. Do not integrate it until its
    API, licensing, and intended use have been reviewed.
-7. Add a profile-scoped, redacted API-debug drawer only after the current
-   polish pass is reviewed and committed.
+7. Add a profile-scoped, account-aware points-calculator view only after the
+   FortiCare calculator endpoint and its program-specific pricing response are
+   verified through the redacted API Log tray.

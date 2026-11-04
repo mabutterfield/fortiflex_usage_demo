@@ -108,6 +108,86 @@ def test_department_create_edit_and_safe_delete(tmp_path, monkeypatch):
     assert refused.status_code == 409
 
 
+def test_api_samples_are_memory_only_and_recursively_redacted(tmp_path, monkeypatch):
+    monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "runtime.db"))
+    monkeypatch.setenv("APP_SECRETS_PATH", str(tmp_path / "connection.json"))
+    from app.debug import record
+    from app.main import app
+
+    record("DebugTest", "Entitlement inventory", "/entitlements/list", {
+        "accountId": 12, "password": "never-return-this",
+    }, {
+        "access_token": "never-return-this-either",
+        "nested": {"apiKey": "also-secret", "status": 0},
+        "entitlements": [{"serialNumber": f"FGVM{i}"} for i in range(6)],
+    })
+    response = TestClient(app).get("/api/debug/log?profile=DebugTest")
+
+    assert response.status_code == 200
+    encoded = response.text
+    assert "never-return-this" not in encoded
+    assert "also-secret" not in encoded
+    sample = response.json()["samples"][0]
+    assert sample["request"]["authorization"] == "Bearer <redacted>"
+    assert sample["response"]["metadata"]["access_token"] == "<redacted>"
+    assert sample["response"]["record_count"] == 6
+    assert len(sample["response"]["sample_records"]) == 5
+
+
+def test_api_sample_is_fabricated_and_limited_to_five_records(tmp_path, monkeypatch):
+    client = client_with_demo(tmp_path, monkeypatch)
+    response = client.get("/api/debug/sample")
+
+    assert response.status_code == 200
+    samples = response.json()["samples"]
+    assert len(samples) == 3
+    assert all(sample["sample_data"] is True for sample in samples)
+    assert all(sample["request"]["body"]["accountId"] == 12345 for sample in samples)
+    assert all(len(sample["response"]["sample_records"]) == 5 for sample in samples)
+    assert samples[1]["response"]["sample_records"][0]["name"] == "SampleFGT1"
+    assert {record["productType"] for record in samples[1]["response"]["sample_records"]} >= {
+        "FortiGate Virtual Machine", "FortiWeb Virtual Machine", "FortiManager Virtual Machine", "FortiAnalyzer Virtual Machine",
+    }
+    assert all("ELT" not in record["serialNumber"] for record in samples[0]["response"]["sample_records"])
+
+
+def test_demo_seeded_serials_are_obviously_fabricated(tmp_path, monkeypatch):
+    client = client_with_demo(tmp_path, monkeypatch)
+    devices = client.get("/api/devices?profile=DemoTest&status=ACTIVE,PENDING").json()
+    assert devices
+    assert all(device["serial"].startswith("SAMPLE-") for device in devices)
+
+
+def test_delete_usage_date_range_clears_local_cache_and_coverage(tmp_path, monkeypatch):
+    client = client_with_demo(tmp_path, monkeypatch)
+    from app.db import connect
+
+    start = date.today() - timedelta(days=160)
+    end = start + timedelta(days=1)
+    with connect("DemoTest") as database:
+        serial = database.execute("SELECT serial FROM devices LIMIT 1").fetchone()[0]
+        for day in (start, end):
+            database.execute(
+                "INSERT INTO usage_records(serial,usage_date,points,source,refreshed_at) VALUES(?,?,?,?,?)",
+                (serial, day.isoformat(), 5, "test", "now"),
+            )
+            database.execute(
+                "INSERT INTO usage_day_coverage(account_id,usage_date,status,detail,refreshed_at) VALUES(?,?,?,?,?)",
+                (123, day.isoformat(), "complete", "", "now"),
+            )
+
+    response = client.post("/api/usage/dates/delete?profile=DemoTest", json={
+        "start_date": start.isoformat(), "end_date": end.isoformat(),
+    })
+
+    assert response.status_code == 200
+    assert response.json()["usage_records_deleted"] == 2
+    assert response.json()["coverage_records_deleted"] == 2
+    with connect("DemoTest") as database:
+        assert database.execute("SELECT COUNT(*) FROM usage_records WHERE usage_date BETWEEN ? AND ?", (start.isoformat(), end.isoformat())).fetchone()[0] == 0
+        assert database.execute("SELECT COUNT(*) FROM usage_day_coverage WHERE usage_date BETWEEN ? AND ?", (start.isoformat(), end.isoformat())).fetchone()[0] == 0
+
+
 def test_pull_week_uses_only_last_seven_complete_days(tmp_path, monkeypatch):
     monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "runtime.db"))
     monkeypatch.setenv("APP_SECRETS_PATH", str(tmp_path / "connection.json"))

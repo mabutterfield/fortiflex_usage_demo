@@ -12,6 +12,8 @@
     [data-theme=onyx]{--page:#202020;--surface:#272727;--text:#d2d2d2;--muted:#999;--header:#454545;--button:#46955c;--button-alt:#444;--border:#3a3a3a;--grid:#3a3a3a;--link:#58b674;--metric:#46955c;--canvas:#252525;--tip:#141414;--shadow:#00000044;--good-bg:#245234;--good-text:#d3f0da;--bad-bg:#60343d;--bad-text:#ffd9dc;--outside:#3a3a3a;--unavailable:#303030;--alert:#ff6b73;--alert-bg:#5c2930;--alert-text:#ffe1e3}
     [data-theme=eclipse]{--page:#202020;--surface:#272727;--text:#d2d2d2;--muted:#999;--header:#454545;--button:#ec9300;--button-alt:#444;--border:#3a3a3a;--grid:#3a3a3a;--link:#ffae2d;--metric:#ec9300;--canvas:#252525;--tip:#141414;--shadow:#00000044;--good-bg:#554526;--good-text:#ffebc3;--bad-bg:#60343d;--bad-text:#ffd9dc;--outside:#3a3a3a;--unavailable:#303030;--alert:#ff6b73;--alert-bg:#5c2930;--alert-text:#ffe1e3}
     [data-theme=retro]{--page:#d5e4e5;--surface:#e5f0f1;--text:#294e4c;--muted:#6c8888;--header:#bdd2d3;--button:#168983;--button-alt:#6c9090;--border:#bad0d0;--grid:#c5d9d9;--link:#087b76;--metric:#168983;--canvas:#e9f3f4;--tip:#1d5552;--shadow:#79999a55;--good-bg:#c5e6db;--good-text:#155f50;--bad-bg:#f1d2d2;--bad-text:#892b2b;--outside:#cadada;--unavailable:#e1ebeb;--alert:#b42318;--alert-bg:#fbe2e2;--alert-text:#892b2b}
+    #apiTray{position:fixed;z-index:10;top:0;right:0;width:min(620px,96vw);height:100vh;padding:0 20px 20px;background:var(--surface);color:var(--text);box-shadow:-8px 0 25px var(--shadow);overflow:auto;transform:translateX(105%);transition:transform .2s ease}#apiTray.open{transform:translateX(0)}#apiTray header{position:sticky;top:0;z-index:1;background:var(--surface);color:var(--text);padding:20px 0 14px;min-height:0;border-bottom:1px solid var(--border)}.tray-head{display:flex;justify-content:space-between;align-items:center;gap:15px}.api-sample{margin:15px 0;padding:12px;border:1px solid var(--border);border-radius:4px}.api-sample summary{cursor:pointer;font-weight:800}.api-sample pre{margin:12px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text)}
+    .day.delete-day.good{background:var(--good-bg);color:var(--good-text)}.day.delete-day.bad{background:var(--bad-bg);color:var(--bad-text)}.day.delete-day.outside{background:var(--outside);color:var(--muted)}.day.delete-day.unavailable{background:var(--unavailable);color:var(--muted)}
   `;
   const picker = document.getElementById("theme");
 
@@ -73,4 +75,72 @@
   };
   apply(selected, false);
   picker.onchange = (event) => apply(event.target.value, true);
+
+  const themePicker = document.querySelector(".theme-picker");
+  if (!themePicker) return;
+
+  const logButton = document.createElement("button");
+  logButton.id = "apiLogButton";
+  logButton.className = "secondary";
+  logButton.textContent = "API Log";
+  logButton.hidden = true;
+  const sampleButton = document.createElement("button");
+  sampleButton.id = "apiSampleButton";
+  sampleButton.className = "secondary";
+  sampleButton.textContent = "API Sample";
+  themePicker.before(logButton, sampleButton);
+
+  const tray = document.createElement("aside");
+  tray.id = "apiTray";
+  tray.setAttribute("aria-label", "FortiFlex API log");
+  tray.innerHTML = `<header><div class="tray-head"><h2>API Log</h2><button class="secondary">Close</button></div><p class="muted" id="apiTrayDescription">Latest successful sample per call for this profile. Authentication values are redacted and samples are memory-only.</p></header><div id="apiSamples" class="muted">No API calls have been captured yet.</div>`;
+  document.body.append(tray);
+  tray.querySelector("button").onclick = () => tray.classList.remove("open");
+
+  const openTray = async (kind) => {
+    const profile = new URLSearchParams(location.search).get("profile") || "";
+    const target = tray.querySelector("#apiSamples");
+    const title = tray.querySelector("h2");
+    const description = tray.querySelector("#apiTrayDescription");
+    const isSample = kind === "sample";
+    title.textContent = isSample ? "API Sample" : "API Log";
+    description.textContent = isSample
+      ? "Fabricated FortiFlex examples for demonstration. Authentication values are redacted."
+      : "Latest successful sample per call for this profile. Authentication values are redacted and samples are memory-only.";
+    tray.classList.add("open");
+    target.className = "muted";
+    target.textContent = isSample ? "Loading sample…" : "Loading API Log…";
+    try {
+      const path = isSample ? "/api/debug/sample" : `/api/debug/log?profile=${encodeURIComponent(profile)}`;
+      const response = await fetch(path);
+      const body = await response.json();
+      if (!response.ok) throw Error(body.detail || `Could not load ${isSample ? "API Sample" : "API Log"}`);
+      target.replaceChildren();
+      if (!body.samples.length) {
+        target.className = "muted";
+        target.textContent = "No supported API calls have been captured for this profile yet.";
+        return;
+      }
+      body.samples.forEach((sample) => {
+        const card = document.createElement("details");
+        card.className = "api-sample";
+        const heading = document.createElement("summary");
+        heading.textContent = `${sample.operation} — ${sample.response.record_count} record(s), showing ${sample.response.sample_records.length}`;
+        const detail = document.createElement("pre");
+        detail.textContent = JSON.stringify(sample, null, 2);
+        card.append(heading, detail);
+        target.append(card);
+      });
+    } catch (error) {
+      target.className = "muted";
+      target.textContent = error.message;
+    }
+  };
+  logButton.onclick = () => openTray("log");
+  sampleButton.onclick = () => openTray("sample");
+  fetch(`/api/status?profile=${encodeURIComponent(new URLSearchParams(location.search).get("profile") || "")}`)
+    .then((response) => response.ok ? response.json() : null)
+    .then((status) => { logButton.hidden = !status || status.sample_mode; })
+    .catch(() => {});
+
 })();

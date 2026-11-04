@@ -36,22 +36,22 @@ def _devices() -> list[tuple]:
     rows: list[tuple] = []
     # Six fabricated entitlements per FortiGate configuration size/profile.
     for config_id, label, serial_prefix in (
-        (1101, "cloud-fg01", "FGVMELT990099"),
-        (1102, "cloud-fg02", "FGVMELT990199"),
-        (1104, "cloud-fg04", "FGVMELT990499"),
+        (1101, "cloud-fg01", "SAMPLE-FGVM-01-"),
+        (1102, "cloud-fg02", "SAMPLE-FGVM-02-"),
+        (1104, "cloud-fg04", "SAMPLE-FGVM-04-"),
     ):
         for number in range(1, 7):
             rows.append(_device(f"{serial_prefix}{number:03d}", f"{label}-{number:02d}", "Cloud", "FortiGate-VM", config_id))
     for config_id, label, serial_prefix, department, count in (
-        (3101, "core-fg2600f", "FGT2600FTF99", "Core", 4),
-        (3120, "rnd-fg120g", "FGT120GTF990", "R&D", 6),
+        (3101, "core-fg2600f", "SAMPLE-FGT-2600F-", "Core", 4),
+        (3120, "rnd-fg120g", "SAMPLE-FGT-120G-", "R&D", 6),
     ):
         for number in range(1, count + 1):
             status = "STOPPED" if config_id == 3120 and number == count else "ACTIVE"
             rows.append(_device(f"{serial_prefix}{number:04d}", f"{label}-{number:02d}", department, "FortiGate-Hardware", config_id, status))
     for number in range(1, 3):
-        rows.append(_device(f"FAZVMELT990010{number:02d}", f"shared-faz-{number:02d}", "SharedInfra", "FortiAnalyzer-VM", 2101))
-        rows.append(_device(f"FMGVMELT990020{number:02d}", f"shared-fmg-{number:02d}", "SharedInfra", "FortiManager-VM", 2201))
+        rows.append(_device(f"SAMPLE-FAZ-VM-{number:02d}", f"shared-faz-{number:02d}", "SharedInfra", "FortiAnalyzer-VM", 2101))
+        rows.append(_device(f"SAMPLE-FMG-VM-{number:02d}", f"shared-fmg-{number:02d}", "SharedInfra", "FortiManager-VM", 2201))
     return rows
 
 

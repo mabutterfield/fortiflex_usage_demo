@@ -1,6 +1,7 @@
 """Small, read-only FortiFlex client. Tokens never leave this module."""
 from __future__ import annotations
 import json
+from collections.abc import Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from .config import ConnectionInput
@@ -26,14 +27,16 @@ def token(connection: ConnectionInput) -> str:
     if not result.get("access_token"): raise FortiFlexError("Authentication response did not contain an access token")
     return result["access_token"]
 
-def list_entitlements(connection: ConnectionInput) -> list[dict]:
-    result = _request(f"{API_BASE}/entitlements/list", {"accountId": connection.account_id, "programSerialNumber": connection.program_serial}, token(connection))
+def list_entitlements(connection: ConnectionInput, capture: Callable[[str, dict, dict], None] | None = None) -> list[dict]:
+    payload = {"accountId": connection.account_id, "programSerialNumber": connection.program_serial}
+    result = _request(f"{API_BASE}/entitlements/list", payload, token(connection))
     if result.get("status") != 0: raise FortiFlexError("FortiFlex did not accept the entitlement-list request")
+    if capture: capture("/entitlements/list", payload, result)
     # Return only inventory fields; API tokens are intentionally discarded.
     allowed = {"serialNumber", "description", "configId", "accountId", "startDate", "endDate", "status", "tokenStatus", "followProgram"}
     return [{key: value for key, value in item.items() if key in allowed} for item in result.get("entitlements", [])]
 
-def daily_points(connection: ConnectionInput, usage_date: str, access_token: str) -> list[dict]:
+def daily_points(connection: ConnectionInput, usage_date: str, access_token: str, capture: Callable[[str, dict, dict], None] | None = None) -> list[dict]:
     """Retrieve a single complete calendar day's points for one account.
 
     FortiFlex returns one aggregate per entitlement for a requested window.  The
@@ -49,6 +52,7 @@ def daily_points(connection: ConnectionInput, usage_date: str, access_token: str
     result = _request(f"{API_BASE}/entitlements/points", payload, access_token)
     if result.get("status") not in (0, None):
         raise FortiFlexError("FortiFlex did not accept the points request")
+    if capture: capture("/entitlements/points", payload, result)
     # API documentation and lab responses have used an entitlements collection.
     # Accept the documented shape and two harmless wrapper variants defensively.
     items = result.get("entitlements") or result.get("points") or result.get("data") or []
@@ -59,15 +63,13 @@ def daily_points(connection: ConnectionInput, usage_date: str, access_token: str
         for item in items if isinstance(item, dict) and (item.get("serialNumber") or item.get("serial"))
     ]
 
-def list_configurations(connection: ConnectionInput) -> list[dict]:
+def list_configurations(connection: ConnectionInput, capture: Callable[[str, dict, dict], None] | None = None) -> list[dict]:
     """Read the program's configuration catalogue without retaining secrets."""
-    result = _request(
-        f"{API_BASE}/configs/list",
-        {"accountId": connection.account_id, "programSerialNumber": connection.program_serial},
-        token(connection),
-    )
+    payload = {"accountId": connection.account_id, "programSerialNumber": connection.program_serial}
+    result = _request(f"{API_BASE}/configs/list", payload, token(connection))
     if result.get("status") not in (0, None):
         raise FortiFlexError("FortiFlex did not accept the configuration-list request")
+    if capture: capture("/configs/list", payload, result)
     items = result.get("configurations") or result.get("configs") or result.get("data") or []
     if isinstance(items, dict):
         # The current list API groups records by product family (for example
