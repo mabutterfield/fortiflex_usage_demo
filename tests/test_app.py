@@ -89,6 +89,25 @@ def test_legacy_multi_account_profile_migrates_to_displayed_account(tmp_path, mo
     assert "accounts" not in migrated["profiles"]["ELAVMR123"]
 
 
+def test_department_create_edit_and_safe_delete(tmp_path, monkeypatch):
+    client = client_with_demo(tmp_path, monkeypatch)
+    created = client.post("/api/departments?profile=DemoTest", json={
+        "code": "LAB", "display_name": "Lab systems", "notes": "temporary",
+    })
+    assert created.status_code == 200
+    edited = client.put("/api/departments/LAB?profile=DemoTest", json={
+        "code": "LAB", "display_name": "Laboratory", "notes": "updated",
+    })
+    assert edited.status_code == 200
+    departments = client.get("/api/departments?profile=DemoTest").json()
+    assert next(row for row in departments if row["code"] == "LAB")["display_name"] == "Laboratory"
+    assert client.delete("/api/departments/LAB?profile=DemoTest").status_code == 200
+
+    assigned_code = client.get("/api/departments?profile=DemoTest").json()[0]["code"]
+    refused = client.delete(f"/api/departments/{assigned_code}?profile=DemoTest")
+    assert refused.status_code == 409
+
+
 def test_pull_week_uses_only_last_seven_complete_days(tmp_path, monkeypatch):
     monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "runtime.db"))
     monkeypatch.setenv("APP_SECRETS_PATH", str(tmp_path / "connection.json"))

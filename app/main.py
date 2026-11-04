@@ -164,11 +164,30 @@ def update_device(serial:str,edit:DeviceEdit,profile:str="demo"):
         c.execute("INSERT OR IGNORE INTO departments(code,display_name) VALUES(?,?)",(code,code))
     return {"ok":True}
 class DepartmentEdit(BaseModel):code:str;display_name:str;notes:str=""
+@app.post("/api/departments")
+def create_department(edit: DepartmentEdit, profile: str="demo"):
+    code = edit.code.strip()
+    if not code:
+        raise HTTPException(400, "Department code is required")
+    with connect(profile) as c:
+        if c.execute("SELECT 1 FROM departments WHERE code=?", (code,)).fetchone():
+            raise HTTPException(409, "That department code already exists")
+        c.execute("INSERT INTO departments(code,display_name,notes) VALUES(?,?,?)", (code, edit.display_name.strip() or code, edit.notes))
+    return {"ok": True, "code": code}
 @app.put("/api/departments/{code}")
 def save_department(code:str,edit:DepartmentEdit,profile:str="demo"):
     if code!=edit.code or not code.strip():raise HTTPException(400,"Department code is required and cannot be renamed")
     with connect(profile) as c:c.execute("INSERT INTO departments(code,display_name,notes) VALUES(?,?,?) ON CONFLICT(code) DO UPDATE SET display_name=excluded.display_name,notes=excluded.notes",(code,edit.display_name.strip() or code,edit.notes))
     return {"ok":True}
+@app.delete("/api/departments/{code}")
+def remove_department(code: str, profile: str="demo"):
+    with connect(profile) as c:
+        assigned = c.execute("SELECT COUNT(*) FROM devices WHERE department_code=?", (code,)).fetchone()[0]
+        if assigned:
+            raise HTTPException(409, f"Reassign the {assigned} entitlement(s) before deleting this department")
+        if not c.execute("DELETE FROM departments WHERE code=?", (code,)).rowcount:
+            raise HTTPException(404, "Department not found")
+    return {"ok": True}
 class ConfigurationEdit(BaseModel):notes:str=""
 @app.put("/api/configurations/{config_id}")
 def update_configuration(config_id:int,edit:ConfigurationEdit,profile:str="demo"):
