@@ -6,7 +6,6 @@ services:
     environment:
       APP_DB_PATH: /app/demo/runtime.db
       APP_SECRETS_PATH: /app/demo/connection.json
-      CURRENCY_RATE: ${CURRENCY_RATE:-}
       TLS_CERT_FILE: ${TLS_CERT_FILE:-}
       TLS_KEY_FILE: ${TLS_KEY_FILE:-}
     volumes:

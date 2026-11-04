@@ -1,3 +1,6 @@
+import json
+from datetime import date, timedelta
+
 from fastapi.testclient import TestClient
 
 
@@ -46,4 +49,78 @@ def test_setup_never_returns_password(tmp_path, monkeypatch):
     assert "not-in-response" not in response.text
     assert response.json()["connection"]["username"] == "reader"
     status = TestClient(app).get("/api/status?profile=ELAVMR123").json()
-    assert status["connection"]["accounts"][0]["password_masked"] is True
+    assert status["connection"]["account"]["password_masked"] is True
+
+
+def test_saving_connection_replaces_profile_account(tmp_path, monkeypatch):
+    monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "runtime.db"))
+    monkeypatch.setenv("APP_SECRETS_PATH", str(tmp_path / "connection.json"))
+    from app.main import app
+
+    client = TestClient(app)
+    for account_id, username in ((12, "first"), (34, "second")):
+        response = client.post("/api/setup", json={
+            "account_id": account_id,
+            "username": username,
+            "password": "local-only-secret",
+            "program_serial": "ELAVMR123",
+        })
+        assert response.status_code == 200
+
+    connection = client.get("/api/status?profile=ELAVMR123").json()["connection"]
+    assert connection["account"] == {"account_id": 34, "username": "second", "password_masked": True}
+
+
+def test_legacy_multi_account_profile_migrates_to_displayed_account(tmp_path, monkeypatch):
+    secret_path = tmp_path / "connection.json"
+    monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "runtime.db"))
+    monkeypatch.setenv("APP_SECRETS_PATH", str(secret_path))
+    secret_path.write_text(json.dumps({"version": 1, "profiles": {
+        "ELAVMR123": {"program_serial": "ELAVMR123", "accounts": [
+            {"account_id": 12, "username": "shown", "password": "first"},
+            {"account_id": 34, "username": "hidden", "password": "second"},
+        ]}
+    }}))
+    from app.config import connection_summary
+
+    assert connection_summary("ELAVMR123")["account"]["username"] == "shown"
+    migrated = json.loads(secret_path.read_text())
+    assert migrated["profiles"]["ELAVMR123"]["connection"]["account_id"] == 12
+    assert "accounts" not in migrated["profiles"]["ELAVMR123"]
+
+
+def test_pull_week_uses_only_last_seven_complete_days(tmp_path, monkeypatch):
+    monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "runtime.db"))
+    monkeypatch.setenv("APP_SECRETS_PATH", str(tmp_path / "connection.json"))
+    from app import main
+    from app.db import connect
+
+    client = TestClient(main.app)
+    client.post("/api/setup", json={
+        "account_id": 12,
+        "username": "reader",
+        "password": "local-only-secret",
+        "program_serial": "ELAVMR123",
+    })
+    yesterday = date.today() - timedelta(days=1)
+    with connect("ELAVMR123") as database:
+        database.execute(
+            "INSERT INTO usage_day_coverage(account_id,usage_date,status,detail,refreshed_at) VALUES(?,?,?,?,?)",
+            (12, yesterday.isoformat(), "complete", "", "now"),
+        )
+
+    launched = {}
+    class FakeThread:
+        def __init__(self, *, target, args, daemon):
+            launched.update(target=target, args=args, daemon=daemon)
+        def start(self):
+            return None
+    monkeypatch.setattr(main.threading, "Thread", FakeThread)
+    response = client.post("/api/pull/missing?profile=ELAVMR123")
+    if main.PULL_LOCK.locked():
+        main.PULL_LOCK.release()
+
+    assert response.status_code == 200
+    assert launched["args"][1] == [
+        (yesterday - timedelta(days=offset)).isoformat() for offset in range(6, 0, -1)
+    ]

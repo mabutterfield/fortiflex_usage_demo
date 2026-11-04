@@ -38,7 +38,21 @@ def _read_registry() -> dict:
     raw = json.loads(path.read_text(encoding="utf-8"))
     if "profiles" not in raw and "program_serial" in raw:
         serial = raw["program_serial"]
-        raw = {"version": 1, "profiles": {serial: {"program_serial": serial, "database": f"{serial}.db", "accounts": [raw]}}}
+        raw = {"version": 2, "profiles": {serial: {"program_serial": serial, "database": f"{serial}.db", "connection": raw}}}
+        _write_registry(raw)
+    # Version 1 allowed more than one account inside a profile. The UI only
+    # ever showed the first one, so retain that same connection on migration.
+    # New profiles have exactly one connection; use a separate profile for a
+    # separate FortiFlex account/program.
+    changed = False
+    for profile in raw["profiles"].values():
+        if "accounts" in profile:
+            accounts = profile.pop("accounts")
+            if accounts:
+                profile["connection"] = accounts[0]
+            changed = True
+    if changed:
+        raw["version"] = 2
         _write_registry(raw)
     return raw
 
@@ -50,7 +64,7 @@ def list_profiles() -> list[dict]:
     registry = _read_registry()
     profiles = []
     for serial, profile in sorted(registry["profiles"].items()):
-        profiles.append({"id": serial, "label": serial, "database": profile.get("database", f"{serial}.db"), "sample_mode": bool(profile.get("sample_mode")), "account_count": len(profile.get("accounts", []))})
+        profiles.append({"id": serial, "label": serial, "database": profile.get("database", f"{serial}.db"), "sample_mode": bool(profile.get("sample_mode")), "account_count": int(bool(profile.get("connection")))})
     return profiles
 
 def is_sample_profile(profile: str) -> bool:
@@ -69,7 +83,7 @@ def create_profile(profile: str, source: str) -> dict:
     destination = database_path(profile)
     if destination.exists():
         raise ValueError("A local database already exists for that environment")
-    entry = {"program_serial": profile, "database": destination.name, "accounts": []}
+    entry = {"program_serial": profile, "database": destination.name}
     if source == "demo":
         entry["sample_mode"] = True
     registry["profiles"][profile] = entry
@@ -78,36 +92,33 @@ def create_profile(profile: str, source: str) -> dict:
 
 def connection_summary(profile: str) -> dict:
     entry = _read_registry()["profiles"].get(profile)
-    accounts = entry.get("accounts", []) if entry else []
+    account = entry.get("connection") if entry else None
     # This is deliberately safe to send to the browser: it identifies saved
     # accounts but never exposes a password or bearer token.
     return {
-        "configured": bool(accounts),
-        "account_count": len(accounts),
-        "accounts": [{"account_id": account["account_id"], "username": account["username"], "password_masked": bool(account.get("password"))} for account in accounts],
+        "configured": bool(account),
+        "account": {"account_id": account["account_id"], "username": account["username"], "password_masked": bool(account.get("password"))} if account else None,
     }
 
 def stored_connection(profile: str) -> ConnectionInput | None:
-    """Return the first saved account for a profile for server-side use only."""
+    """Return the one saved account for a profile for server-side use only."""
     entry = _read_registry()["profiles"].get(profile)
-    if not entry or not entry.get("accounts"):
+    if not entry or not entry.get("connection"):
         return None
-    return ConnectionInput.model_validate(entry["accounts"][0])
-
-def stored_connections(profile: str) -> list[ConnectionInput]:
-    entry = _read_registry()["profiles"].get(profile)
-    return [ConnectionInput.model_validate(account) for account in entry.get("accounts", [])] if entry else []
+    return ConnectionInput.model_validate(entry["connection"])
 
 def save_connection(data: ConnectionInput) -> None:
     registry = _read_registry(); profiles = registry["profiles"]
-    profile = profiles.setdefault(data.program_serial, {"program_serial": data.program_serial, "database": f"{data.program_serial}.db", "accounts": []})
+    profile = profiles.setdefault(data.program_serial, {"program_serial": data.program_serial, "database": f"{data.program_serial}.db"})
     profile.pop("sample_mode", None)
-    saved = data.model_dump(); accounts = profile["accounts"]
-    profile["accounts"] = [a for a in accounts if not (a["account_id"] == saved["account_id"] and a["username"] == saved["username"])] + [saved]
+    profile["connection"] = data.model_dump()
     _write_registry(registry)
 
 def clear_connection(profile: str) -> None:
-    registry = _read_registry(); registry["profiles"].pop(profile, None); _write_registry(registry)
+    registry = _read_registry()
+    if profile in registry["profiles"]:
+        registry["profiles"][profile].pop("connection", None)
+        _write_registry(registry)
 
 def delete_profile(profile: str) -> None:
     """Remove exactly one locally managed profile and its SQLite files."""

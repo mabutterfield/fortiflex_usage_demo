@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from .config import ConnectionInput, clear_connection, connection_summary, create_profile, delete_profile, is_sample_profile, list_profiles, save_connection, stored_connection, stored_connections
+from .config import ConnectionInput, clear_connection, connection_summary, create_profile, delete_profile, is_sample_profile, list_profiles, save_connection, stored_connection
 from .db import connect
 from .fortiflex import FortiFlexError, daily_points, list_configurations, list_entitlements, token
 from .seed import seed
@@ -30,7 +30,7 @@ def view_days(view: str) -> list[str]:
     raise HTTPException(400, "Unknown display range")
 
 def coverage(profile: str, days: list[str]) -> list[dict]:
-    accounts = stored_connections(profile)
+    account = stored_connection(profile)
     if not days: return []
     with connect(profile) as c:
         if is_sample_profile(profile):
@@ -39,7 +39,7 @@ def coverage(profile: str, days: list[str]) -> list[dict]:
             found = {r["usage_date"]: r["count"] for r in rows}
             return [{"usage_date": d, "complete": expected > 0 and found.get(d, 0) >= expected} for d in days]
         rows = c.execute("SELECT usage_date,COUNT(*) count FROM usage_day_coverage WHERE status='complete' AND usage_date IN (%s) GROUP BY usage_date" % ",".join("?"*len(days)),days).fetchall()
-    found, expected = {r["usage_date"]:r["count"] for r in rows},len(accounts)
+    found, expected = {r["usage_date"]:r["count"] for r in rows},int(account is not None)
     return [{"usage_date":d,"complete":expected>0 and found.get(d,0)>=expected} for d in days]
 
 def series(profile: str, days: list[str], department: str|None=None, serial: str|None=None) -> list[dict]:
@@ -186,10 +186,9 @@ class ConnectionSave(BaseModel):
 def setup(connection:ConnectionSave):
     password = connection.password
     if not password:
-        for saved in stored_connections(connection.program_serial):
-            if saved.account_id == connection.account_id and saved.username == connection.username:
-                password = saved.password
-                break
+        saved = stored_connection(connection.program_serial)
+        if saved and saved.account_id == connection.account_id and saved.username == connection.username:
+            password = saved.password
     try:
         validated = ConnectionInput(account_id=connection.account_id, username=connection.username, password=password, program_serial=connection.program_serial)
     except Exception as error:
@@ -207,9 +206,9 @@ def test_setup(connection:ConnectionInput|None=None,profile:str="demo"):
 @app.post("/api/inventory/populate")
 def populate_inventory(profile:str):
     if is_sample_profile(profile):raise HTTPException(400,"Demo inventory is already populated")
-    accounts=stored_connections(profile)
-    if not accounts:raise HTTPException(400,"No saved account for this profile")
-    try:inventory=[item for account in accounts for item in list_entitlements(account) if item.get("serialNumber")]
+    account=stored_connection(profile)
+    if not account:raise HTTPException(400,"No saved account for this profile")
+    try:inventory=[item for item in list_entitlements(account) if item.get("serialNumber")]
     except FortiFlexError as error:raise HTTPException(502,str(error)) from error
     added,kept=0,0
     with connect(profile) as c:
@@ -224,10 +223,10 @@ def populate_inventory(profile:str):
 @app.post("/api/configurations/populate")
 def populate_configurations(profile: str):
     if is_sample_profile(profile): raise HTTPException(400,"Demo profile has no FortiFlex configuration catalogue")
-    accounts = stored_connections(profile)
-    if not accounts: raise HTTPException(400,"No saved account for this profile")
+    account = stored_connection(profile)
+    if not account: raise HTTPException(400,"No saved account for this profile")
     try:
-        entries = [entry for account in accounts for entry in list_configurations(account)]
+        entries = list_configurations(account)
     except FortiFlexError as error:
         raise HTTPException(502,str(error)) from error
     now = datetime.now(timezone.utc).isoformat()
@@ -236,37 +235,44 @@ def populate_configurations(profile: str):
             c.execute("INSERT INTO configurations(config_id,product,config_name,features,status,notes,refreshed_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(config_id) DO UPDATE SET product=excluded.product,config_name=excluded.config_name,features=excluded.features,status=excluded.status,refreshed_at=excluded.refreshed_at",(entry["config_id"],entry["product"],entry["config_name"],json.dumps(entry["features"],sort_keys=True),entry["status"],"",now))
     return {"ok":True,"configurations_seen":len(entries)}
 
+@app.post("/api/catalog/populate")
+def populate_catalog(profile: str):
+    """Refresh the two linked FortiFlex catalogues in one explicit action."""
+    inventory = populate_inventory(profile)
+    configurations = populate_configurations(profile)
+    return {"ok": True, "inventory": inventory, "configurations": configurations}
+
 def pull_worker(profile:str,selected:list[str]):
-    job,accounts=PULL_JOBS[profile],stored_connections(profile)
+    job,account=PULL_JOBS[profile],stored_connection(profile)
     try:
-        tokens={a.account_id:token(a) for a in accounts}
+        if account is None: raise RuntimeError("No saved account for this profile")
+        access_token=token(account)
         for day in selected:
-            for account in accounts:
-                try:
-                    readings=daily_points(account,day,tokens[account.account_id])
-                    with connect(profile) as c:
-                        known={r["serial"] for r in c.execute("SELECT serial FROM devices")};now=datetime.now(timezone.utc).isoformat()
-                        for item in readings:
-                            if item["serial"] in known and item["points"] is not None:c.execute("INSERT INTO usage_records(serial,usage_date,points,source,refreshed_at) VALUES(?,?,?,?,?) ON CONFLICT(serial,usage_date) DO UPDATE SET points=excluded.points,source=excluded.source,refreshed_at=excluded.refreshed_at",(item["serial"],day,float(item["points"]),"fortiflex",now))
-                        c.execute("INSERT INTO usage_day_coverage(account_id,usage_date,status,detail,refreshed_at) VALUES(?,?,?,?,?) ON CONFLICT(account_id,usage_date) DO UPDATE SET status='complete',detail='',refreshed_at=excluded.refreshed_at",(account.account_id,day,"complete","",now))
-                except Exception as error:
-                    with connect(profile) as c:c.execute("INSERT INTO usage_day_coverage(account_id,usage_date,status,detail,refreshed_at) VALUES(?,?,?,?,?) ON CONFLICT(account_id,usage_date) DO UPDATE SET status='failed',detail=excluded.detail,refreshed_at=excluded.refreshed_at",(account.account_id,day,"failed",str(error)[:180],datetime.now(timezone.utc).isoformat()))
-                job["completed"]+=1;job["message"]="Retrieved %s of %s account-day readings"%(job["completed"],job["total"]);time.sleep(1)
+            try:
+                readings=daily_points(account,day,access_token)
+                with connect(profile) as c:
+                    known={r["serial"] for r in c.execute("SELECT serial FROM devices")};now=datetime.now(timezone.utc).isoformat()
+                    for item in readings:
+                        if item["serial"] in known and item["points"] is not None:c.execute("INSERT INTO usage_records(serial,usage_date,points,source,refreshed_at) VALUES(?,?,?,?,?) ON CONFLICT(serial,usage_date) DO UPDATE SET points=excluded.points,source=excluded.source,refreshed_at=excluded.refreshed_at",(item["serial"],day,float(item["points"]),"fortiflex",now))
+                    c.execute("INSERT INTO usage_day_coverage(account_id,usage_date,status,detail,refreshed_at) VALUES(?,?,?,?,?) ON CONFLICT(account_id,usage_date) DO UPDATE SET status='complete',detail='',refreshed_at=excluded.refreshed_at",(account.account_id,day,"complete","",now))
+            except Exception as error:
+                with connect(profile) as c:c.execute("INSERT INTO usage_day_coverage(account_id,usage_date,status,detail,refreshed_at) VALUES(?,?,?,?,?) ON CONFLICT(account_id,usage_date) DO UPDATE SET status='failed',detail=excluded.detail,refreshed_at=excluded.refreshed_at",(account.account_id,day,"failed",str(error)[:180],datetime.now(timezone.utc).isoformat()))
+            job["completed"]+=1;job["message"]="Retrieved %s of %s day readings"%(job["completed"],job["total"]);time.sleep(1)
         job.update({"status":"complete","message":"Cached %s complete day(s); today was excluded."%len(selected)})
     except Exception as error:job.update({"status":"failed","message":"Pull stopped: "+str(error)[:180]})
     finally:PULL_LOCK.release()
 @app.post("/api/pull/{mode}")
 def pull(mode:str,profile:str):
     if is_sample_profile(profile):raise HTTPException(400,"Sample data is already local")
-    accounts=stored_connections(profile)
-    if not accounts:raise HTTPException(400,"No saved account for this profile")
+    account=stored_connection(profile)
+    if not account:raise HTTPException(400,"No saved account for this profile")
     if not PULL_LOCK.acquire(False):raise HTTPException(409,"Another pull is already running")
     try:
-        if mode=="missing":selected=[x["usage_date"] for x in coverage(profile,list(reversed(days_back(90)))) if not x["complete"]][:7]
+        if mode=="missing":selected=[x["usage_date"] for x in coverage(profile,days_back(7)) if not x["complete"]]
         elif mode=="full":selected=days_back(90)
         else:raise HTTPException(404,"Unknown pull mode")
         if not selected:PULL_LOCK.release();return {"ok":True,"message":"No completed days need a pull."}
-        PULL_JOBS[profile]={"status":"running","completed":0,"total":len(selected)*len(accounts),"message":"Starting secure daily pull"}
+        PULL_JOBS[profile]={"status":"running","completed":0,"total":len(selected),"message":"Starting secure daily pull"}
         threading.Thread(target=pull_worker,args=(profile,selected),daemon=True).start()
         return {"ok":True,"message":"Started %s pull for %s completed day(s)."%(mode,len(selected))}
     except Exception:

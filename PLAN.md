@@ -21,8 +21,8 @@ Implemented so far:
 3. Read-only live inventory, point, and configuration-catalogue pulls. A
    configuration includes the FortiFlex name separately from its concise local
    profile summary.
-4. One program can contain multiple saved FortiFlex accounts. Inventory and
-   configuration pulls preserve local notes and department mapping.
+4. One profile has one saved FortiFlex account. Inventory and configuration
+   pulls preserve local notes and department mapping.
 
 ## Confirmed integration behavior
 
@@ -72,3 +72,8 @@ inclusive/exclusive boundary behavior before calling those results daily usage.
    summary, not a SKU.
 5. Keep the scope read-only: this application does not alter running devices or
    FortiFlex entitlements.
+6. Evaluate the official FortiFlex Calculator as a future reference for point
+   estimation and configuration interpretation. Do not integrate it until its
+   API, licensing, and intended use have been reviewed.
+7. Add a profile-scoped, redacted API-debug drawer only after the current
+   polish pass is reviewed and committed.
