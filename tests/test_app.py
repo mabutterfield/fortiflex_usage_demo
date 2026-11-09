@@ -35,6 +35,31 @@ def test_demo_profile_dashboard_and_static_assets(tmp_path, monkeypatch):
     assert client.get("/static/theme-options.js").status_code == 200
 
 
+def test_orphaned_database_can_be_used_or_explicitly_replaced(tmp_path, monkeypatch):
+    monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "runtime.db"))
+    monkeypatch.setenv("APP_SECRETS_PATH", str(tmp_path / "connection.json"))
+    from app.db import connect
+    from app.main import app
+
+    with connect("ExistingDB") as database:
+        database.execute("INSERT INTO departments(code,display_name,notes) VALUES(?,?,?)", ("LEGACY", "Legacy cache", "keep"))
+    client = TestClient(app)
+    conflict = client.post("/api/profiles", json={"profile": "ExistingDB", "source": "program"})
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "database_exists"
+    adopted = client.post("/api/profiles", json={"profile": "ExistingDB", "source": "program", "existing_database": "use"})
+    assert adopted.status_code == 200
+    assert any(row["code"] == "LEGACY" for row in client.get("/api/departments?profile=ExistingDB").json())
+
+    with connect("ReplaceDB") as database:
+        database.execute("INSERT INTO departments(code,display_name,notes) VALUES(?,?,?)", ("OLD", "Old cache", "replace"))
+    replaced = client.post("/api/profiles", json={"profile": "ReplaceDB", "source": "demo", "existing_database": "replace"})
+    assert replaced.status_code == 200
+    replacement_departments = client.get("/api/departments?profile=ReplaceDB").json()
+    assert any(row["code"] == "SharedInfra" for row in replacement_departments)
+    assert not any(row["code"] == "OLD" for row in replacement_departments)
+
+
 def test_setup_never_returns_password(tmp_path, monkeypatch):
     monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "runtime.db"))
     monkeypatch.setenv("APP_SECRETS_PATH", str(tmp_path / "connection.json"))
@@ -50,6 +75,39 @@ def test_setup_never_returns_password(tmp_path, monkeypatch):
     assert response.json()["connection"]["username"] == "reader"
     status = TestClient(app).get("/api/status?profile=ELAVMR123").json()
     assert status["connection"]["account"]["password_masked"] is True
+
+
+def test_environment_connection_requires_profile_and_does_not_persist_secret(tmp_path, monkeypatch):
+    secret_path = tmp_path / "connection.json"
+    monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "runtime.db"))
+    monkeypatch.setenv("APP_SECRETS_PATH", str(secret_path))
+    monkeypatch.setenv("FORTIFLEX_CONNECTIONS_JSON", json.dumps({
+        "ELAVMR123": {
+            "account_id": 12, "username": "environment-reader",
+            "password": "environment-only-secret", "program_serial": "ELAVMR123",
+        },
+    }))
+    from app.main import app
+
+    client = TestClient(app)
+    assert client.get("/api/profiles").json() == []
+    assert client.post("/api/profiles", json={"profile": "ELAVMR123", "source": "program"}).status_code == 200
+    environment_status = client.get("/api/status?profile=ELAVMR123").json()
+    assert environment_status["connection"]["source"] == "environment"
+    assert environment_status["connection"]["account"]["username"] == "environment-reader"
+    assert "environment-only-secret" not in secret_path.read_text()
+    refused = client.post("/api/setup", json={
+        "account_id": 12, "username": "environment-reader", "password": "replacement",
+        "program_serial": "ELAVMR123",
+    })
+    assert refused.status_code == 409
+
+    local = client.post("/api/setup", json={
+        "account_id": 34, "username": "local-reader", "password": "local-only-secret",
+        "program_serial": "ELAVMR456",
+    })
+    assert local.status_code == 200
+    assert client.get("/api/status?profile=ELAVMR456").json()["connection"]["source"] == "local"
 
 
 def test_saving_connection_replaces_profile_account(tmp_path, monkeypatch):

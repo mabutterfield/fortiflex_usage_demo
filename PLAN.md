@@ -5,9 +5,9 @@
 The application is one Docker Compose service: a FastAPI application serving
 its web UI and a per-profile SQLite database on the mounted `demo/` volume. Default publishing is
 `127.0.0.1:8088`, with address/port configurable in Compose. TLS is optional via
-mounted PEM certificate/key paths. Credentials live in a mode-0600 local file or
-are sourced from environment variables/mounted secrets; none, certificates, or
-runtime data are committed.
+mounted PEM certificate/key paths. Credentials live in a mode-0600 local file
+or in the optional `FORTIFLEX_CONNECTIONS_JSON` launch environment; none,
+certificates, or runtime data are committed.
 
 ## Implemented
 

@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from typing import Literal
 from .config import ConnectionInput, clear_connection, connection_summary, create_profile, delete_profile, is_sample_profile, list_profiles, save_connection, stored_connection
 from .db import connect
 from .debug import demo_samples, record as record_api_sample, samples as api_samples
@@ -74,13 +75,16 @@ def profiles(): return list_profiles()
 class ProfileCreate(BaseModel):
     profile: str
     source: str
+    existing_database: Literal["error", "use", "replace"] = "error"
 @app.post("/api/profiles")
 def new_profile(request: ProfileCreate):
     try:
-        created = create_profile(request.profile.strip(), request.source)
+        created = create_profile(request.profile.strip(), request.source, request.existing_database)
         if request.source == "demo":
             seed(created["id"])
         return created
+    except FileExistsError as error:
+        raise HTTPException(409, {"code": "database_exists", "message": str(error)}) from error
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
 @app.delete("/api/profiles/{profile}")
@@ -344,7 +348,11 @@ def setup(connection:ConnectionSave):
         validated = ConnectionInput(account_id=connection.account_id, username=connection.username, password=password, program_serial=connection.program_serial)
     except Exception as error:
         raise HTTPException(400, "Enter a password for a new account.") from error
-    save_connection(validated);return {"ok":True,"profile":validated.program_serial,"connection":{"account_id":validated.account_id,"username":validated.username}}
+    try:
+        save_connection(validated)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    return {"ok":True,"profile":validated.program_serial,"connection":{"account_id":validated.account_id,"username":validated.username}}
 @app.delete("/api/setup")
 def clear_setup(profile:str):clear_connection(profile);return {"ok":True}
 @app.post("/api/setup/test")

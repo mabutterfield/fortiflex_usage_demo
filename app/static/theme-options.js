@@ -148,3 +148,65 @@
     .catch(() => {});
 
 })();
+
+// Profile creation lives here so the compact inline dashboard script remains
+// backward compatible while this flow can offer a safe choice for orphaned DBs.
+(() => {
+  const byId = (id) => document.getElementById(id);
+  const dialog = byId("newEnvironment");
+  if (!dialog) return;
+  const menu = dialog.querySelector("menu");
+  const createButton = menu.querySelector("button[type='button']");
+  const useButton = document.createElement("button");
+  useButton.type = "button";
+  useButton.className = "secondary hide";
+  useButton.textContent = "Use existing database";
+  const replaceButton = document.createElement("button");
+  replaceButton.type = "button";
+  replaceButton.className = "hide";
+  replaceButton.textContent = "Replace database";
+  menu.insertBefore(useButton, createButton);
+  menu.insertBefore(replaceButton, createButton);
+
+  window.openNewEnvironment = () => {
+    byId("newSource").value = "program";
+    byId("newProfile").value = "";
+    byId("newEnvironmentMessage").textContent = "";
+    useButton.classList.add("hide");
+    replaceButton.classList.add("hide");
+    createButton.classList.remove("hide");
+    dialog.showModal();
+  };
+
+  window.createEnvironment = async (existingDatabase = "error") => {
+    const profile = byId("newProfile").value;
+    const source = byId("newSource").value;
+    const message = byId("newEnvironmentMessage");
+    if (existingDatabase === "replace" && !confirm(`Replace the existing local database for ${profile}? Its cached data and local notes cannot be recovered.`)) return;
+    try {
+      const response = await fetch("/api/profiles", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({profile, source, existing_database: existingDatabase}),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        const detail = result.detail || {};
+        if (detail.code === "database_exists") {
+          message.textContent = `A local database already exists. Use it unchanged, or replace it with a new ${byId("newSource").selectedOptions[0].text} profile.`;
+          useButton.classList.remove("hide");
+          replaceButton.classList.remove("hide");
+          createButton.classList.add("hide");
+          return;
+        }
+        throw Error(typeof detail === "string" ? detail : detail.message || "Could not create profile");
+      }
+      location.search = `?profile=${encodeURIComponent(result.id)}`;
+    } catch (error) {
+      message.textContent = error.message;
+    }
+  };
+  createButton.onclick = () => window.createEnvironment();
+  useButton.onclick = () => window.createEnvironment("use");
+  replaceButton.onclick = () => window.createEnvironment("replace");
+})();

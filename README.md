@@ -69,12 +69,75 @@ Credential Manager, or a Linux Secret Service) or a platform-managed secret
 mount. An external vault integration is intentionally outside this demo's
 scope.
 
+### Optional environment-managed credentials
+
+To avoid writing a program's credentials to `demo/connection.json`, create its
+empty **FortiFlex program** profile in the UI, then launch Compose with one
+environment variable containing a JSON object keyed by that profile name. The
+profile still owns its local SQLite cache; only its credentials stay outside
+the app's mounted data directory.
+
+```sh
+export FORTIFLEX_CONNECTIONS_JSON='{
+  "ELAVMR0000000226": {
+    "account_id": 1037022,
+    "username": "YOUR_API_USERNAME",
+    "password": "YOUR_API_PASSWORD",
+    "program_serial": "ELAVMR0000000226"
+  }
+}'
+docker compose up -d
+```
+
+The JSON key and `program_serial` must match exactly. A matching created
+profile shows **Environment-managed**; its credentials are used for testing,
+catalog pulls, usage pulls, and configuration pricing, but **Edit connection**
+is disabled. Other profiles can continue to use locally saved connections.
+Environment credentials take precedence over an older local saved connection
+for the same profile and are never copied into `connection.json` or SQLite.
+
+If you prefer to build the JSON from shell variables, the shell syntax uses
+`=` (not a space after `export`):
+
+```sh
+export FORTIFLEX_ACCOUNT_ID="1037022"
+export FORTIFLEX_USERNAME="YOUR_API_USERNAME"
+export FORTIFLEX_PASSWORD="YOUR_API_PASSWORD"
+export FORTIFLEX_PROGRAM_SERIAL="ELAVMR0000000226"
+export FORTIFLEX_CONNECTIONS_JSON="$(python3 -c 'import json, os; print(json.dumps({os.environ["FORTIFLEX_PROGRAM_SERIAL"]: {"account_id": int(os.environ["FORTIFLEX_ACCOUNT_ID"]), "username": os.environ["FORTIFLEX_USERNAME"], "password": os.environ["FORTIFLEX_PASSWORD"], "program_serial": os.environ["FORTIFLEX_PROGRAM_SERIAL"]}}))')"
+```
+
+For the simplest interactive setup, source the included helper instead. It
+prompts for the same values, hides the password while typing, safely creates
+the JSON, and writes no credential file:
+
+```sh
+source scripts/set-fortiflex-env.sh
+docker compose up -d
+```
+
+It must be sourced rather than executed so `FORTIFLEX_CONNECTIONS_JSON` remains
+in the shell that launches Docker. The helper needs `bash` and `python3`.
+
+Do not add this secret value to `.env` or Git. With `docker compose up -d`,
+Docker retains the variable for the life of the running container; stop and
+recreate the container to remove it. Docker administrators can inspect a
+container's environment, so this is a no-local-app-secret-file option, not a
+replacement for a vault.
+
 Use **New profile** in the Profile controls to create either an empty
 FortiFlex-program profile (then use Edit connection) or a named Demo
 environment. The latter is generated from the tracked
 [`app/seed.py`](app/seed.py) definition, stays in sample mode, and is useful
 for a disposable walkthrough. Generated SQLite databases remain local and are
 ignored by Git.
+
+If an unregistered local database already exists for the requested profile
+name, profile creation pauses and offers two explicit choices: **Use existing
+database** registers it without changing its cache or notes (choose a FortiFlex
+program profile for this); **Replace database** deletes that local database and
+creates the selected new profile. Registered profiles are not eligible for this
+shortcut—delete them explicitly through the UI first.
 
 ## Dashboard and local cache
 
@@ -150,8 +213,9 @@ new data:
   does not advertise a pending price change.
 - Sample-mode refresh and idempotent SQLite records keyed by serial/date.
 - Web API setup route and CLI use the same input validation. Credentials are
-  saved only server-side in plaintext `demo/connection.json` with restricted
-  permissions; API responses never return passwords.
+  either saved only server-side in plaintext `demo/connection.json` with
+  restricted permissions or injected through the optional environment-managed
+  profile mode; API responses never return passwords.
 - **API Log** is a right-side debug tray on live profiles. It retains one
   in-memory response each for entitlement inventory, configuration catalogue,
   daily points, calculator metadata, and configuration pricing calls. Live
